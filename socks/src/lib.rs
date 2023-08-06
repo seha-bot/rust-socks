@@ -48,7 +48,6 @@ impl HttpResponse {
     }
 }
 
-#[derive(Eq, PartialEq)]
 pub enum HttpRequest {
     Get(String),
     Post { url: String, body: String },
@@ -129,7 +128,7 @@ impl HttpRequest {
     }
 }
 
-fn handle_client(routes: &[Route], mut stream: TcpStream) {
+fn handle_client(routes: &Vec<Route>, mut stream: TcpStream) {
     let request = match HttpRequest::from_stream(&mut stream) {
         Some(val) => val,
         None => {
@@ -149,13 +148,15 @@ fn handle_client(routes: &[Route], mut stream: TcpStream) {
     let _ = stream.write(&response.as_bytes());
 }
 
-pub fn run(routes: &[Route]) {
+pub fn run(routes: &[fn() -> Route]) {
+    let routes: Vec<Route> = routes.iter().map(|e| e()).collect();
+
     let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
 
     for stream in listener.incoming() {
         if stream.is_err() {
             continue;
         }
-        handle_client(routes, stream.unwrap());
+        handle_client(&routes, stream.unwrap());
     }
 }

@@ -11,4 +11,9 @@ name = "socks-bin"
 version = "0.1.0"
 dependencies = [
  "socks",
+ "socks-macro",
 ]
+
+[[package]]
+name = "socks-macro"
+version = "0.1.0"
