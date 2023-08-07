@@ -1,11 +1,6 @@
 use socks::{HttpRequest, HttpResponse, Route};
 use socks_macro::endpoint;
 
-#[endpoint(GET "/")]
-fn index(_request: HttpRequest) -> HttpResponse {
-    HttpResponse::Ok("I am alive!!".to_string())
-}
-
 #[endpoint(GET "/bob/{msg}")]
 fn bob(request: HttpRequest) -> HttpResponse {
     HttpResponse::Ok(format!("Bob says {}", request.url()[1]))
@@ -18,6 +13,6 @@ fn bob_post(request: HttpRequest) -> HttpResponse {
 }
 
 fn main() {
-    let routes = [index_route, bob_route, bob_post_route];
+    let routes = [bob_route, bob_post_route];
     socks::run(&routes);
 }

@@ -20,6 +20,7 @@ pub fn endpoint(args: TokenStream, item: TokenStream) -> TokenStream {
         _ => panic!(),
     };
 
-    let route = format!("fn {name}_route()->Route{{Route{{request:{request},handler:{name}}}}}");
+    let route =
+        format!("fn {name}_route()->Route{{Route{{request:{request},handler:Box::new({name})}}}}");
     (item + &route).parse().unwrap()
 }

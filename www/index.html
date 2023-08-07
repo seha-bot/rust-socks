@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="description" content="Homepage of the best website in the world">
+        <meta name="author" content="seha">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+        <title>home</title>
+
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Silkscreen">
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Fragment Mono">
+        <link rel="stylesheet" href="/assets/style.css">
+    </head>
+
+    <body>
+        <div class="navbar">
+            <a href="/"><img alt="seha" height="45" width="108.75"></a>
+            <script>
+                let data = new Image();
+                data.src = "/assets/images/seha.webp";
+                data.onload = () => document.getElementsByTagName("img")[0].src = data.src;
+                if (data.complete) data.onload();
+            </script>
+            <a href="/api">API</a>
+        </div>
+
+        <div class="general">
+            <h1>Welcome to my site!</h1>
+
+            <p>Why are you here?</p>
+        </div>
+    </body>
+</html>
