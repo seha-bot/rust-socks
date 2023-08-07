@@ -13,6 +13,10 @@ pub fn endpoint(args: TokenStream, item: TokenStream) -> TokenStream {
 
     let request = match args[0] {
         "GET" => format!("HttpRequest::Get({}.to_string())", args[1]),
+        "POST" => format!(
+            "HttpRequest::Post{{url:{}.to_string(),body:String::new()}}",
+            args[1]
+        ),
         _ => panic!(),
     };
 
