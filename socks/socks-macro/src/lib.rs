@@ -11,16 +11,11 @@ pub fn endpoint(args: TokenStream, item: TokenStream) -> TokenStream {
         .nth(0)
         .unwrap();
 
-    let item = item.replace(
-        format!("fn {name}").as_str(),
-        format!("fn {name}_body").as_str(),
-    );
-
     let request = match args[0] {
         "GET" => format!("HttpRequest::Get({}.to_string())", args[1]),
         _ => panic!(),
     };
 
-    let wrapper = format!("fn {name}()->Route{{Route{{request:{request},handler:{name}_body}}}}");
-    (item + &wrapper).parse().unwrap()
+    let route = format!("fn {name}_route()->Route{{Route{{request:{request},handler:{name}}}}}");
+    (item + &route).parse().unwrap()
 }
