@@ -14,5 +14,5 @@ fn bob_post(request: HttpRequest) -> HttpResponse {
 
 fn main() {
     let routes = [bob_route, bob_post_route];
-    socks::run(&routes);
+    socks::run("127.0.0.1:8080", &routes);
 }

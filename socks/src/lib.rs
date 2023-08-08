@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -29,25 +30,31 @@ impl HttpRequest {
             }
         }
 
-        let words: Vec<&str> = content.split_whitespace().collect();
+        let content: String = content.chars().filter(|c| *c != '\r').collect();
+        let lines: Vec<&str> = content.split('\n').collect();
+
+        let headers: HashMap<&str, &str> = lines[1..]
+            .iter()
+            .filter_map(|e| {
+                let e = e.split_once(':')?;
+                Some((e.0.trim(), e.1.trim()))
+            })
+            .collect();
+
+        let words: Vec<&str> = lines.get(0)?.split_whitespace().collect();
         let req_type = *words.get(0)?;
         let url = words.get(1)?.to_string();
 
         match req_type {
             "GET" => Some(HttpRequest::Get(url)),
             "POST" => {
-                let len_start = content.find("Content-Length:")? + 16;
-                let len_end = len_start + content[len_start..].find('\r')?;
+                let len: usize = headers.get("Content-Length")?.parse().ok()?;
+                let body_start = content.find("\n\n")?;
 
-                match content[len_start..len_end].parse::<usize>() {
-                    Ok(len) => Some(HttpRequest::Post {
-                        url,
-                        body: content[len_end + 4..len_end + 4 + len].to_string(),
-                    }),
-                    Err(_) => {
-                        return None;
-                    }
-                }
+                Some(HttpRequest::Post {
+                    url,
+                    body: content[body_start..body_start + len].to_string(),
+                })
             }
             _ => None,
         }
@@ -73,6 +80,7 @@ impl HttpRequest {
 
 pub enum HttpResponse {
     Ok(String),
+    Raw(Vec<u8>),
     BadRequest,
     NotFound,
     ServerError,
@@ -80,12 +88,23 @@ pub enum HttpResponse {
 
 impl HttpResponse {
     fn as_bytes(&self) -> Vec<u8> {
-        match self {
-            HttpResponse::Ok(msg) => format!("HTTP/1.0 200 OK\r\n\r\n{msg}").as_bytes().to_vec(),
-            HttpResponse::BadRequest => "HTTP/1.0 400\r\n\r\n".as_bytes().to_vec(),
-            HttpResponse::NotFound => "HTTP/1.0 404\r\n\r\n".as_bytes().to_vec(),
-            HttpResponse::ServerError => "HTTP/1.0 500\r\n\r\n".as_bytes().to_vec(),
-        }
+        let mut http = "HTTP/1.1 ".as_bytes().to_vec();
+
+        http.extend(match self {
+            HttpResponse::Ok(msg) => format!("200\r\n\r\n{msg}").into_bytes(),
+            HttpResponse::Raw(bytes) => {
+                let mut headers =
+                    format!("200\r\nContent-Length: {}\r\n\r\n", bytes.len()).into_bytes();
+
+                headers.extend(bytes);
+                headers
+            }
+            HttpResponse::BadRequest => "400\r\n\r\n".as_bytes().to_vec(),
+            HttpResponse::NotFound => "404\r\n\r\n".as_bytes().to_vec(),
+            HttpResponse::ServerError => "500\r\n\r\n".as_bytes().to_vec(),
+        });
+
+        http
     }
 }
 
@@ -98,20 +117,16 @@ impl Route {
     fn from_file(request_path: String, file_path: String) -> Self {
         Route {
             request: HttpRequest::Get(request_path),
-            handler: Box::new(move |_| {
-                let mut file = match File::open(&file_path) {
-                    Ok(val) => val,
-                    Err(_) => {
+            handler: Box::new(move |_| match File::open(&file_path) {
+                Ok(mut file) => {
+                    let mut content = Vec::<u8>::new();
+                    if let Err(_) = file.read_to_end(&mut content) {
                         return HttpResponse::ServerError;
                     }
-                };
 
-                let mut content = String::new();
-                if let Err(_) = file.read_to_string(&mut content) {
-                    return HttpResponse::ServerError;
+                    HttpResponse::Raw(content)
                 }
-
-                HttpResponse::Ok(content)
+                Err(_) => HttpResponse::ServerError,
             }),
         }
     }
@@ -127,12 +142,8 @@ impl Route {
         }
 
         for (i, v) in dirs.iter().enumerate() {
-            let mut chars = self_dirs[i].chars();
-
-            if chars.nth(0) == Some('{') && chars.nth_back(0) == Some('}') {
-                continue;
-            }
-            if *v != self_dirs[i] {
+            if *v != self_dirs[i] && !(self_dirs[i].starts_with('{') && self_dirs[i].ends_with('}'))
+            {
                 return false;
             }
         }
@@ -160,34 +171,33 @@ fn add_all_dirs(routes: &mut Vec<Route>, path: &str) {
         for path in paths {
             if let Ok(path) = path {
                 if let Ok(data) = path.metadata() {
+                    let path = path.path().to_str().unwrap().to_string();
+                    let request_path = path.replace("www", "");
+
                     if data.is_dir() {
-                        add_all_dirs(routes, path.path().to_str().unwrap());
+                        add_all_dirs(routes, &path);
                         continue;
                     }
 
-                    let file_path = path.path().to_str().unwrap().to_string();
-                    let request_path = file_path.replace("./www", "");
-
-                    if file_path.ends_with("index.html") {
+                    if path.ends_with("index.html") {
                         routes.push(Route::from_file(
                             request_path.replace("index.html", ""),
-                            file_path.clone(),
+                            path.clone(),
                         ));
                     }
 
-                    routes.push(Route::from_file(request_path, file_path));
+                    routes.push(Route::from_file(request_path, path));
                 }
             }
         }
     }
 }
 
-pub fn run(routes: &[fn() -> Route]) {
+pub fn run(address: &str, routes: &[fn() -> Route]) {
     let mut routes: Vec<Route> = routes.iter().map(|e| e()).collect();
+    add_all_dirs(&mut routes, "www");
 
-    add_all_dirs(&mut routes, "./www");
-
-    let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
+    let listener = TcpListener::bind(address).unwrap();
 
     for stream in listener.incoming() {
         if stream.is_err() {
