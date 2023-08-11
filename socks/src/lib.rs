@@ -49,7 +49,7 @@ impl HttpRequest {
             "GET" => Some(HttpRequest::Get(url)),
             "POST" => {
                 let len: usize = headers.get("Content-Length")?.parse().ok()?;
-                let body_start = content.find("\n\n")?;
+                let body_start = content.find("\n\n")? + 2;
 
                 Some(HttpRequest::Post {
                     url,
@@ -80,6 +80,7 @@ impl HttpRequest {
 
 pub enum HttpResponse {
     Ok(String),
+    Json(String),
     Raw(Vec<u8>),
     BadRequest,
     NotFound,
@@ -92,6 +93,9 @@ impl HttpResponse {
 
         http.extend(match self {
             HttpResponse::Ok(msg) => format!("200\r\n\r\n{msg}").into_bytes(),
+            HttpResponse::Json(json) => {
+                format!("200\r\nContent-Type: application/json\r\n\r\n{json}").into_bytes()
+            }
             HttpResponse::Raw(bytes) => {
                 let mut headers =
                     format!("200\r\nContent-Length: {}\r\n\r\n", bytes.len()).into_bytes();
@@ -205,4 +209,41 @@ pub fn run(address: &str, routes: &[fn() -> Route]) {
         }
         handle_client(&routes, stream.unwrap());
     }
+}
+
+pub fn map_json(json: &str) -> Option<HashMap<&str, &str>> {
+    if json.chars().nth(0)? != '{' {
+        return None;
+    }
+
+    let mut map = HashMap::new();
+    let mut value_start = 1;
+    let mut last_key = None;
+    let mut is_in_quotes = false;
+
+    for i in 0..json.len() {
+        match (json.chars().nth(i)?, is_in_quotes) {
+            ('"', _) => {
+                if json.chars().nth(i - 1)? != '\\' {
+                    is_in_quotes = !is_in_quotes;
+                }
+            }
+            (':', false) => {
+                last_key = Some(&json[value_start + 1..i - 1]);
+                value_start = i + 1;
+            }
+            (',', false) | ('}', false) => {
+                if json.chars().nth(value_start)? == '"' && json.chars().nth(i - 1)? == '"' {
+                    map.insert(last_key?, &json[value_start + 1..i - 1]);
+                } else {
+                    map.insert(last_key?, &json[value_start..i]);
+                }
+                last_key = None;
+                value_start = i + 1;
+            }
+            _ => (),
+        };
+    }
+
+    Some(map)
 }
