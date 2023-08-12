@@ -4,9 +4,11 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::time::Duration;
 
-pub enum HttpRequest {
-    Get(String),
-    Post { url: String, body: String },
+pub struct HttpRequest {
+    pub url: String,
+    pub req_type: String,
+    pub caller_ip: String,
+    pub body: Option<String>,
 }
 
 impl HttpRequest {
@@ -20,11 +22,7 @@ impl HttpRequest {
             if let Err(_) = stream.read(&mut buffer) {
                 break;
             }
-            content.push_str(
-                String::from_utf8(buffer.to_vec())
-                    .unwrap()
-                    .trim_matches('\0'),
-            );
+            content.push_str(String::from_utf8(buffer.to_vec()).ok()?.trim_matches('\0'));
             if buffer[1023] == 0 {
                 break;
             }
@@ -42,39 +40,20 @@ impl HttpRequest {
             .collect();
 
         let words: Vec<&str> = lines.get(0)?.split_whitespace().collect();
-        let req_type = *words.get(0)?;
-        let url = words.get(1)?.to_string();
+        let req_type = words.get(0)?.to_string();
 
-        match req_type {
-            "GET" => Some(HttpRequest::Get(url)),
-            "POST" => {
-                let len: usize = headers.get("Content-Length")?.parse().ok()?;
+        Some(HttpRequest {
+            url: words.get(1)?.to_string(),
+            caller_ip: stream.peer_addr().ok()?.ip().to_string(),
+            body: if req_type == "POST" {
                 let body_start = content.find("\n\n")? + 2;
-
-                Some(HttpRequest::Post {
-                    url,
-                    body: content[body_start..body_start + len].to_string(),
-                })
-            }
-            _ => None,
-        }
-    }
-
-    pub fn url(&self) -> Vec<&str> {
-        match self {
-            HttpRequest::Get(url) => url,
-            HttpRequest::Post { url, body: _ } => url,
-        }
-        .split('/')
-        .filter(|e| !e.is_empty())
-        .collect()
-    }
-
-    pub fn body(&self) -> Option<String> {
-        match self {
-            HttpRequest::Post { url: _, body } => Some(body.clone()),
-            _ => None,
-        }
+                let len: usize = headers.get("Content-Length")?.parse().ok()?;
+                Some(content[body_start..body_start + len].to_string())
+            } else {
+                None
+            },
+            req_type,
+        })
     }
 }
 
@@ -118,10 +97,27 @@ pub struct Route {
 }
 
 impl Route {
-    fn from_file(request_path: String, file_path: String) -> Self {
+    pub fn new(
+        url: String,
+        req_type: String,
+        handler: Box<dyn Fn(HttpRequest) -> HttpResponse>,
+    ) -> Self {
         Route {
-            request: HttpRequest::Get(request_path),
-            handler: Box::new(move |_| match File::open(&file_path) {
+            request: HttpRequest {
+                url,
+                req_type,
+                caller_ip: String::new(),
+                body: None,
+            },
+            handler,
+        }
+    }
+
+    fn from_file(request_path: String, file_path: String) -> Self {
+        Self::new(
+            request_path,
+            String::from("GET"),
+            Box::new(move |_| match File::open(&file_path) {
                 Ok(mut file) => {
                     let mut content = Vec::<u8>::new();
                     if let Err(_) = file.read_to_end(&mut content) {
@@ -132,82 +128,26 @@ impl Route {
                 }
                 Err(_) => HttpResponse::ServerError,
             }),
-        }
+        )
     }
 
     fn is_basically_the_same_as(&self, request: &HttpRequest) -> bool {
-        let self_dirs = self.request.url();
-        let dirs = request.url();
-
-        if self_dirs.len() != dirs.len()
-            || std::mem::discriminant(&self.request) != std::mem::discriminant(request)
-        {
+        if self.request.url.is_empty() && request.url == "/" {
+            return true;
+        } else if self.request.req_type != request.req_type {
             return false;
         }
 
-        for (i, v) in dirs.iter().enumerate() {
-            if *v != self_dirs[i] && !(self_dirs[i].starts_with('{') && self_dirs[i].ends_with('}'))
-            {
+        let self_dirs = self.request.url.split('/');
+        let dirs = request.url.split('/');
+
+        for (dir, self_dir) in dirs.clone().zip(self_dirs.clone()) {
+            if dir != self_dir && !(self_dir.starts_with('{') && self_dir.ends_with('}')) {
                 return false;
             }
         }
-        true
-    }
-}
 
-fn handle_client(routes: &Vec<Route>, mut stream: TcpStream) {
-    if let Some(request) = HttpRequest::from_stream(&mut stream) {
-        let mut response = match request {
-            HttpRequest::Get(_) => HttpResponse::Ok("404 Nothing here :/".to_string()),
-            HttpRequest::Post { url: _, body: _ } => HttpResponse::BadRequest,
-        };
-
-        if let Some(route) = routes.iter().find(|e| e.is_basically_the_same_as(&request)) {
-            response = (route.handler)(request);
-        }
-
-        let _ = stream.write(&response.as_bytes());
-    }
-}
-
-fn add_all_dirs(routes: &mut Vec<Route>, path: &str) {
-    if let Ok(paths) = fs::read_dir(path) {
-        for path in paths {
-            if let Ok(path) = path {
-                if let Ok(data) = path.metadata() {
-                    let path = path.path().to_str().unwrap().to_string();
-                    let request_path = path.replace("www", "");
-
-                    if data.is_dir() {
-                        add_all_dirs(routes, &path);
-                        continue;
-                    }
-
-                    if path.ends_with("index.html") {
-                        routes.push(Route::from_file(
-                            request_path.replace("index.html", ""),
-                            path.clone(),
-                        ));
-                    }
-
-                    routes.push(Route::from_file(request_path, path));
-                }
-            }
-        }
-    }
-}
-
-pub fn run(address: &str, routes: &[fn() -> Route]) {
-    let mut routes: Vec<Route> = routes.iter().map(|e| e()).collect();
-    add_all_dirs(&mut routes, "www");
-
-    let listener = TcpListener::bind(address).unwrap();
-
-    for stream in listener.incoming() {
-        if stream.is_err() {
-            continue;
-        }
-        handle_client(&routes, stream.unwrap());
+        dirs.count() == self_dirs.count()
     }
 }
 
@@ -246,4 +186,60 @@ pub fn map_json(json: &str) -> Option<HashMap<&str, &str>> {
     }
 
     Some(map)
+}
+
+fn add_all_dirs(routes: &mut Vec<Route>, path: &str) {
+    if let Ok(paths) = fs::read_dir(path) {
+        for path in paths {
+            if let Ok(path) = path {
+                if let Ok(data) = path.metadata() {
+                    let path = path.path().to_str().unwrap().to_string();
+                    let request_path = path.replace("www", "");
+
+                    if data.is_dir() {
+                        add_all_dirs(routes, &path);
+                        continue;
+                    }
+
+                    if path.ends_with("index.html") {
+                        routes.push(Route::from_file(
+                            request_path.replace("/index.html", ""),
+                            path.clone(),
+                        ));
+                    }
+
+                    routes.push(Route::from_file(request_path, path));
+                }
+            }
+        }
+    }
+}
+
+fn handle_client(routes: &Vec<Route>, mut stream: TcpStream) {
+    if let Some(request) = HttpRequest::from_stream(&mut stream) {
+        let mut response = match request.req_type.as_str() {
+            "GET" => HttpResponse::Ok("404 Nothing here :/".to_string()),
+            _ => HttpResponse::BadRequest,
+        };
+
+        if let Some(route) = routes.iter().find(|e| e.is_basically_the_same_as(&request)) {
+            response = (route.handler)(request);
+        }
+
+        let _ = stream.write(&response.as_bytes());
+    }
+}
+
+pub fn run(address: &str, routes: &[fn() -> Route]) {
+    let mut routes: Vec<Route> = routes.iter().map(|e| e()).collect();
+    add_all_dirs(&mut routes, "www");
+
+    let listener = TcpListener::bind(address).unwrap();
+
+    for stream in listener.incoming() {
+        if stream.is_err() {
+            continue;
+        }
+        handle_client(&routes, stream.unwrap());
+    }
 }

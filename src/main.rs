@@ -1,23 +1,18 @@
 use std::sync::Mutex;
 
 use socks::{map_json, HttpRequest, HttpResponse, Route};
-use socks_macro::{endpoint, model};
+use socks_macro::endpoint;
 
 #[derive(Debug)]
-#[model("/users" "/users/{id}")]
 struct User {
-    #[res]
     id: u64,
-    #[all]
     name: String,
-    #[req]
     password: String,
-    #[all]
     description: String,
 }
 
 impl User {
-    pub fn from_request(request: &str, id: u64) -> Option<Self> {
+    fn from_request(request: &str, id: u64) -> Option<Self> {
         let json = map_json(request)?;
 
         Some(User {
@@ -28,7 +23,7 @@ impl User {
         })
     }
 
-    pub fn to_response(&self) -> String {
+    fn to_response(&self) -> String {
         format!(
             "{{\"id\":{},\"name\":\"{}\",\"description\":\"{}\"}}",
             self.id, self.name, self.description
@@ -40,7 +35,7 @@ static USERS: Mutex<Vec<User>> = Mutex::new(Vec::new());
 
 #[endpoint(POST "/users")]
 fn create_user(request: HttpRequest) -> HttpResponse {
-    match User::from_request(&request.body().unwrap(), 0) {
+    match User::from_request(&request.body.unwrap(), 0) {
         Some(user) => {
             let mut users = USERS.lock().unwrap();
             println!("{:?}", user);
@@ -70,7 +65,7 @@ fn get_users(request: HttpRequest) -> HttpResponse {
 
 #[endpoint(GET "/users/{id}")]
 fn get_user(request: HttpRequest) -> HttpResponse {
-    match request.url()[1].parse::<u64>() {
+    match request.url[7..].parse::<u64>() {
         Ok(id) => {
             let users = USERS.lock().unwrap();
 
