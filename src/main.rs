@@ -1,87 +1,57 @@
-use std::sync::Mutex;
+use std::{collections::HashMap, sync::Mutex};
 
 use socks::{HttpRequest, HttpResponse};
-use socks_macro::{endpoint, model};
+use socks_macro::endpoint;
 
-#[derive(Debug)]
-#[model("/users" name password description > id name description)]
-pub struct User {
-    pub id: u64,
-    pub name: String,
-    pub password: String,
-    pub description: String,
+static MESSAGES: Mutex<Vec<String>> = Mutex::new(Vec::new());
+static NAMES: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
+
+#[endpoint(GET "/messages")]
+fn get_messages(request: HttpRequest) -> HttpResponse {
+    let mut messages = MESSAGES.lock().unwrap();
+    let messages = messages.join("");
+    HttpResponse::Ok(messages)
 }
 
-impl User {
-    fn from_request(request: &str, id: u64) -> Option<Self> {
-        let json = socks::map_json(request)?;
+#[endpoint(POST "/messages")]
+fn post_message(request: HttpRequest) -> HttpResponse {
+    let mut messages = MESSAGES.lock().unwrap();
+    let names = NAMES.lock().unwrap();
+    let names = names.as_ref().unwrap();
 
-        Some(User {
-            id,
-            name: json["name"].parse().ok()?,
-            password: json["password"].parse().ok()?,
-            description: json["description"].parse().ok()?,
-        })
-    }
+    let name = match names.get(&request.caller_ip) {
+        Some(name) => name.clone(),
+        None => request.caller_ip,
+    };
 
-    fn to_response(&self) -> String {
-        format!(
-            "{{\"id\":{},\"name\":\"{}\",\"description\":\"{}\"}}",
-            self.id, self.name, self.description
-        )
-    }
+    messages.push(format!(
+        "<p>{name}</p><div>{}</div>",
+        request.body.unwrap().replace("\\n", "<br>")
+    ));
+
+    HttpResponse::Ok(String::new())
 }
 
-static USERS: Mutex<Vec<User>> = Mutex::new(Vec::new());
+#[endpoint(GET "/rename/{name}")]
+fn rename(request: HttpRequest) -> HttpResponse {
+    let mut names = NAMES.lock().unwrap();
+    let names = names.as_mut().unwrap();
 
-#[endpoint(POST "/users")]
-fn create_user(request: HttpRequest) -> HttpResponse {
-    let mut users = USERS.lock().unwrap();
-    match User::from_request(&request.body.unwrap(), users.len() as u64) {
-        Some(user) => {
-            println!("{:?}", user);
-            users.push(user);
-            HttpResponse::Ok("User created!".to_string())
-        }
-        None => HttpResponse::BadRequest,
-    }
-}
+    let name = &request.url[8..];
+    names.insert(request.caller_ip.to_string(), name.to_string());
 
-#[endpoint(GET "/users")]
-fn get_users(request: HttpRequest) -> HttpResponse {
-    let users = USERS.lock().unwrap();
-
-    let mut json = "[".to_string();
-    for (i, user) in users.iter().enumerate() {
-        json += &user.to_response();
-
-        if i != users.len() - 1 {
-            json += ",";
-        }
-    }
-    json += "]";
-
-    HttpResponse::Json(json)
-}
-
-#[endpoint(GET "/users/{id}")]
-fn get_user(request: HttpRequest) -> HttpResponse {
-    match request.url[7..].parse::<u64>() {
-        Ok(id) => {
-            let users = USERS.lock().unwrap();
-
-            match users.iter().find(|e| e.id == id) {
-                Some(user) => HttpResponse::Json(user.to_response()),
-                None => HttpResponse::NotFound,
-            }
-        }
-        Err(_) => {
-            return HttpResponse::BadRequest;
-        }
-    }
+    HttpResponse::Ok(String::new())
 }
 
 fn main() {
-    let routes = [create_user_route, get_users_route, get_user_route];
-    socks::run("127.0.0.1:8080", &routes);
+    {
+        let mut names = NAMES.lock().unwrap();
+        *names = Some(HashMap::from([(
+            String::from("127.0.0.1"),
+            String::from("MASTER"),
+        )]));
+    }
+
+    let routes = [get_messages_route, post_message_route, rename_route];
+    socks::run("0.0.0.0:8080", &routes);
 }

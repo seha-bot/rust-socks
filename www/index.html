@@ -2,33 +2,23 @@
 <html>
     <head>
         <meta charset="UTF-8">
-        <meta name="description" content="Homepage of the best website in the world">
-        <meta name="author" content="seha">
+        <meta name="description" content="Najbolja stranica na svijetu">
+        <meta name="author" content="Boli te briga">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
         <title>home</title>
 
-        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Silkscreen">
-        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Fragment Mono">
         <link rel="stylesheet" href="/assets/style.css">
+        <script defer src="assets/message.js"></script>
     </head>
 
     <body>
-        <div class="navbar">
-            <a href="/"><img alt="seha" height="45" width="108.75"></a>
-            <script>
-                let data = new Image();
-                data.src = "/assets/images/seha.webp";
-                data.onload = () => document.getElementsByTagName("img")[0].src = data.src;
-                if (data.complete) data.onload();
-            </script>
-            <a href="/api">API</a>
-        </div>
-
         <div class="general">
-            <h1>Pozdrav!</h1>
-
-            <p>...</p>
+            <div id="wall"></div>
+            <div id="inputs">
+                <textarea name="message" id="message" cols="30" rows="3"></textarea>
+                <button type="button" onclick="send_message()">SEND</button>
+            </div>
         </div>
     </body>
 </html>

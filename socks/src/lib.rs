@@ -4,16 +4,9 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::time::Duration;
 
-pub trait Documentation {
-    fn name() -> &'static str;
-    fn endpoint() -> &'static str;
-    fn request() -> &'static str;
-    fn response() -> &'static str;
-}
-
 pub struct HttpRequest {
     pub url: String,
-    pub req_type: String,
+    pub verb: String,
     pub caller_ip: String,
     pub body: Option<String>,
 }
@@ -47,19 +40,19 @@ impl HttpRequest {
             .collect();
 
         let words: Vec<&str> = lines.get(0)?.split_whitespace().collect();
-        let req_type = words.get(0)?.to_string();
+        let verb = words.get(0)?.to_string();
 
         Some(HttpRequest {
             url: words.get(1)?.to_string(),
             caller_ip: stream.peer_addr().ok()?.ip().to_string(),
-            body: if req_type == "POST" {
+            body: if verb == "POST" {
                 let body_start = content.find("\n\n")? + 2;
                 let len: usize = headers.get("Content-Length")?.parse().ok()?;
-                Some(content[body_start..body_start + len].to_string())
+                Some(content.get(body_start..body_start + len)?.to_string())
             } else {
                 None
             },
-            req_type,
+            verb,
         })
     }
 }
@@ -106,13 +99,13 @@ pub struct Route {
 impl Route {
     pub fn new(
         url: String,
-        req_type: String,
+        verb: String,
         handler: Box<dyn Fn(HttpRequest) -> HttpResponse>,
     ) -> Self {
         Route {
             request: HttpRequest {
                 url,
-                req_type,
+                verb,
                 caller_ip: String::new(),
                 body: None,
             },
@@ -141,7 +134,7 @@ impl Route {
     fn is_basically_the_same_as(&self, request: &HttpRequest) -> bool {
         if self.request.url.is_empty() && request.url == "/" {
             return true;
-        } else if self.request.req_type != request.req_type {
+        } else if self.request.verb != request.verb {
             return false;
         }
 
@@ -224,7 +217,7 @@ fn add_all_dirs(routes: &mut Vec<Route>, path: &str) {
 
 fn handle_client(routes: &Vec<Route>, mut stream: TcpStream) {
     if let Some(request) = HttpRequest::from_stream(&mut stream) {
-        let mut response = match request.req_type.as_str() {
+        let mut response = match request.verb.as_str() {
             "GET" => HttpResponse::Ok("404 Nothing here :/".to_string()),
             _ => HttpResponse::BadRequest,
         };
