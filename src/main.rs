@@ -1,19 +1,20 @@
 use std::sync::Mutex;
 
-use socks::{map_json, HttpRequest, HttpResponse, Route};
-use socks_macro::endpoint;
+use socks::{HttpRequest, HttpResponse};
+use socks_macro::{endpoint, model};
 
 #[derive(Debug)]
-struct User {
-    id: u64,
-    name: String,
-    password: String,
-    description: String,
+#[model("/users" name password description > id name description)]
+pub struct User {
+    pub id: u64,
+    pub name: String,
+    pub password: String,
+    pub description: String,
 }
 
 impl User {
     fn from_request(request: &str, id: u64) -> Option<Self> {
-        let json = map_json(request)?;
+        let json = socks::map_json(request)?;
 
         Some(User {
             id,
@@ -35,9 +36,9 @@ static USERS: Mutex<Vec<User>> = Mutex::new(Vec::new());
 
 #[endpoint(POST "/users")]
 fn create_user(request: HttpRequest) -> HttpResponse {
-    match User::from_request(&request.body.unwrap(), 0) {
+    let mut users = USERS.lock().unwrap();
+    match User::from_request(&request.body.unwrap(), users.len() as u64) {
         Some(user) => {
-            let mut users = USERS.lock().unwrap();
             println!("{:?}", user);
             users.push(user);
             HttpResponse::Ok("User created!".to_string())

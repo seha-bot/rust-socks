@@ -4,6 +4,13 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::time::Duration;
 
+pub trait Documentation {
+    fn name() -> &'static str;
+    fn endpoint() -> &'static str;
+    fn request() -> &'static str;
+    fn response() -> &'static str;
+}
+
 pub struct HttpRequest {
     pub url: String,
     pub req_type: String,
